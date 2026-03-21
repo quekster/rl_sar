@@ -3,7 +3,7 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, TextSubstitution, Command
 from launch_ros.actions import Node
@@ -13,11 +13,14 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     rname = LaunchConfiguration("rname")
+    # Hardcode world file name here (without ".world")
+    wname = "go2_stairs_18cm"
 
-    wname = "stairs"
-    robot_name = ParameterValue(Command(["echo -n ", rname]), value_type=str)
-    ros_namespace = ParameterValue(Command(["echo -n ", "/", rname, "_gazebo"]), value_type=str)
-    gazebo_model_name = ParameterValue(Command(["echo -n ", rname, "_gazebo"]), value_type=str)
+    robot_name_sub = Command(["echo -n ", rname])
+    gazebo_model_name_sub = Command(["echo -n ", rname, "_gazebo"])
+
+    robot_name = ParameterValue(robot_name_sub, value_type=str)
+    gazebo_model_name = ParameterValue(gazebo_model_name_sub, value_type=str)
 
     robot_description = ParameterValue(
         Command([
@@ -41,8 +44,6 @@ def generate_launch_description():
             os.path.join(get_package_share_directory("gazebo_ros"), "launch", "gazebo.launch.py")
         ),
         launch_arguments={
-            # "verbose": "true",
-            # "pause": "true",  # Not Available
             "world": os.path.join(get_package_share_directory("rl_sar"), "worlds", wname + ".world"),
         }.items(),
     )
@@ -52,8 +53,11 @@ def generate_launch_description():
         executable="spawn_entity.py",
         arguments=[
             "-topic", "/robot_description",
-            "-entity", "robot_model",
-            "-z", "1.0",
+            "-entity", gazebo_model_name_sub,
+            "-x", "-0.6",
+            "-y", "0.0",
+            "-z", "0.42",
+            "-timeout", "120",
         ],
         output="screen",
     )
@@ -65,13 +69,6 @@ def generate_launch_description():
         output="screen",
     )
 
-    robot_joint_controller_node = Node(
-        package="controller_manager",
-        executable='spawner.py' if os.environ.get('ROS_DISTRO', '') == 'foxy' else 'spawner',
-        arguments=["robot_joint_controller"],
-        output="screen",
-    )
-
     joy_node = Node(
         package='joy',
         executable='joy_node',
@@ -80,6 +77,18 @@ def generate_launch_description():
         parameters=[{
             'deadzone': 0.1,
             'autorepeat_rate': 0.0,
+        }],
+    )
+
+    lidar_preprocessor_node = Node(
+        package="rl_sar",
+        executable="lidar_obs_preprocessor.py",
+        name="lidar_obs_preprocessor",
+        output="screen",
+        parameters=[{
+            "target_frame": "base",
+            "expected_points": 45,
+            "max_range": 70.0,
         }],
     )
 
@@ -99,11 +108,13 @@ def generate_launch_description():
             description="Robot name (e.g., a1, go2)",
             default_value=TextSubstitution(text=""),
         ),
+        # Avoid remote model DB fetch stalls that can delay /spawn_entity service startup.
+        SetEnvironmentVariable("GAZEBO_MODEL_DATABASE_URI", ""),
         robot_state_publisher_node,
         gazebo,
         spawn_entity,
         joint_state_broadcaster_node,
-        # robot_joint_controller_node,  # Spawn in rl_sim.cpp
         joy_node,
+        lidar_preprocessor_node,
         param_node,
     ])

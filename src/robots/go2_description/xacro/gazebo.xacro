@@ -67,6 +67,46 @@
         </sensor>
     </gazebo>
 
+    <gazebo reference="Head_lower">
+        <sensor name="head_lidar" type="ray">
+            <always_on>true</always_on>
+            <update_rate>20</update_rate>
+            <visualize>false</visualize>
+
+            <ray>
+                <scan>
+                    <horizontal>
+                    <samples>9</samples>
+                    <resolution>1</resolution>
+                    <min_angle>-0.785398</min_angle>   <!-- -45 deg -->
+                    <max_angle>0.785398</max_angle>    <!-- +45 deg -->
+                    </horizontal>
+                    <vertical>
+                    <samples>5</samples>
+                    <resolution>1</resolution>
+                    <min_angle>-1.047198</min_angle>   <!-- -60 deg -->
+                    <max_angle>-0.349066</max_angle>   <!-- -20 deg -->
+                    </vertical>
+                </scan>
+                <range>
+                    <min>0.10</min>
+                    <max>70.0</max>
+                    <resolution>0.01</resolution>
+                </range>
+            </ray>
+
+            <plugin name="head_lidar_ros2" filename="libgazebo_ros_ray_sensor.so">
+                <ros>
+                    <namespace>/</namespace>
+                    <remapping>~/out:=/rl_sar/lidar_points</remapping>
+                </ros>
+                <output_type>sensor_msgs/PointCloud2</output_type>
+                <frame_name>Head_lower</frame_name>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+
 
 
 
@@ -211,6 +251,45 @@
             </z>
           </linear_acceleration>
         </imu>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="Head_lower">
+      <sensor name="head_lidar" type="ray">
+        <always_on>true</always_on>
+        <update_rate>20</update_rate>
+        <visualize>false</visualize>
+
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>9</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.785398</min_angle>
+              <max_angle>0.785398</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>5</samples>
+              <resolution>1</resolution>
+              <min_angle>-1.047198</min_angle>
+              <max_angle>-0.349066</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>70.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+
+        <plugin name="head_lidar_ros2" filename="libgazebo_ros_ray_sensor.so">
+          <ros>
+            <namespace>/</namespace>
+            <remapping>~/out:=/rl_sar/lidar_points</remapping>
+          </ros>
+          <output_type>sensor_msgs/PointCloud2</output_type>
+          <frame_name>Head_lower</frame_name>
+        </plugin>
       </sensor>
     </gazebo>
 

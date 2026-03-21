@@ -40,6 +40,8 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <gazebo_msgs/msg/model_states.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_srvs/srv/empty.hpp>
 #include <rcl_interfaces/srv/get_parameters.hpp>
 #endif
@@ -99,13 +101,20 @@ private:
 #elif defined(USE_ROS2)
     sensor_msgs::msg::Imu gazebo_imu;
     geometry_msgs::msg::Twist cmd_vel;
+    geometry_msgs::msg::Twist model_twist_world;
     sensor_msgs::msg::Joy joy_msg;
+    std::vector<float> lidar_obs_buffer = std::vector<float>(135, 1.0f);
+    double last_lidar_obs_time = 0.0;
+    bool model_state_available = false;
     robot_msgs::msg::RobotCommand robot_command_publisher_msg;
     robot_msgs::msg::RobotState robot_state_subscriber_msg;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr gazebo_imu_subscriber;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_subscriber;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscriber;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber;
+    rclcpp::Subscription<gazebo_msgs::msg::ModelStates>::SharedPtr gazebo_model_states_subscriber;
+    rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr lidar_obs_subscriber;
+    // rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_pause_physics_client;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_unpause_physics_client;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_reset_world_client;
@@ -113,6 +122,9 @@ private:
     rclcpp::Subscription<robot_msgs::msg::RobotState>::SharedPtr robot_state_subscriber;
     rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr param_client;
     void GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
+    void GazeboModelStatesCallback(const gazebo_msgs::msg::ModelStates::SharedPtr msg);
+    void LidarObsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg);
+    // void OdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void CmdvelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
     void RobotStateCallback(const robot_msgs::msg::RobotState::SharedPtr msg);
     void JoyCallback(const sensor_msgs::msg::Joy::SharedPtr msg);

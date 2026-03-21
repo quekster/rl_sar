@@ -28,6 +28,11 @@ torch::Tensor RL::ComputeObservation()
 {
     std::vector<torch::Tensor> obs_list;
 
+    if (this->params.observations.empty())
+    {
+        throw std::runtime_error("No observations configured in policy config.");
+    }
+
     for (const std::string &observation : this->params.observations)
     {
         if (observation == "lin_vel_world")
@@ -67,6 +72,15 @@ torch::Tensor RL::ComputeObservation()
         }
         else if (observation == "commands")
         {
+            if (this->obs.commands.size(1) != this->params.commands_scale.size(1))
+            {
+                throw std::runtime_error(
+                    "commands dimension mismatch: obs.commands has " +
+                    std::to_string(this->obs.commands.size(1)) +
+                    " but commands_scale has " +
+                    std::to_string(this->params.commands_scale.size(1))
+                );
+            }
             obs_list.push_back(this->obs.commands * this->params.commands_scale);
 #ifdef _OBS_DEBUG_PRINT
             std::cout << "commands: " << this->obs.commands * this->params.commands_scale << std::endl;
@@ -98,13 +112,12 @@ torch::Tensor RL::ComputeObservation()
             std::cout << "actions: " << this->obs.actions << std::endl;
 #endif
         }
-        else if (observation == "height_scan")
+        else if (observation == "lidar_obs")
         {
-            obs_list.push_back(this->obs.height_scan);
+            obs_list.push_back(this->obs.lidar_scan);
 #ifdef _OBS_DEBUG_PRINT
-            std::cout << "height_scan: " << this->obs.height_scan << std::endl;
+            std::cout << "lidar_obs: " << this->obs.lidar_scan << std::endl;
 #endif
-            obs_list.push_back(torch::clamp(this->obs.height_scan, -2.0f, 2.0f));
         }
         else if (observation == "phase")
         {
@@ -143,34 +156,51 @@ torch::Tensor RL::ComputeObservation()
         {
             obs_list.push_back(torch::tensor({{0.31f}}));
         }
+        else
+        {
+            throw std::runtime_error("Unsupported observation token in config: " + observation);
+        }
     }
 
     this->obs_dims.clear();
     for (const auto& obs : obs_list)
     {
-       this->obs_dims.push_back(obs.size(1));
+        this->obs_dims.push_back(obs.size(1));
     }
 
     torch::Tensor obs = torch::cat(obs_list, 1);
+    if (this->params.num_observations > 0 && obs.size(1) != this->params.num_observations)
+    {
+        throw std::runtime_error(
+            "Observation dimension mismatch: config num_observations=" +
+            std::to_string(this->params.num_observations) +
+            ", assembled=" + std::to_string(obs.size(1))
+        );
+    }
+
     torch::Tensor clamped_obs = torch::clamp(obs, -this->params.clip_obs, this->params.clip_obs);
     return clamped_obs;
 }
 
 void RL::InitObservations()
 {
+    int64_t command_dim = 3;
+    if (this->params.commands_scale.numel() != 0)
+    {
+        command_dim = this->params.commands_scale.size(1);
+    }
+
     this->obs.lin_vel = torch::tensor({{0.0, 0.0, 0.0}});
     this->obs.ang_vel = torch::tensor({{0.0, 0.0, 0.0}});
     this->obs.gravity_vec = torch::tensor({{0.0, 0.0, -1.0}});
-    this->obs.commands = torch::tensor({{0.0, 0.0, 0.0}});
+    this->obs.commands = torch::zeros({1, command_dim});
     this->obs.base_quat = torch::tensor({{0.0, 0.0, 0.0, 1.0}});
     this->obs.dof_pos = this->params.default_dof_pos;
     this->obs.dof_vel = torch::zeros({1, this->params.num_of_dofs});
     this->obs.actions = torch::zeros({1, this->params.num_of_dofs});
-    // this->obs.height_scan = torch::ones({1, 187}) * 0.31f;
-    this->obs.height_scan = torch::full({1, 187}, 0.31f); // initialize height_scan observation
+    this->obs.lidar_scan = torch::full({1, this->params.lidar_obs_dim}, 0.31f);
     this->ComputeObservation();
 }
-
 void RL::InitOutputs()
 {
     this->output_dof_tau = torch::zeros({1, this->params.num_of_dofs});
@@ -190,6 +220,23 @@ void RL::InitRL(std::string robot_path)
     this->ReadYamlRL(robot_path);
     for (std::string &observation : this->params.observations)
     {
+        if (observation == "root_lin_vel_b")
+        {
+            observation = "lin_vel_body";
+        }
+        else if (observation == "root_ang_vel_b")
+        {
+            observation = "ang_vel_body";
+        }
+        else if (observation == "projected_gravity_b")
+        {
+            observation = "gravity_vec";
+        }
+        else if (observation == "joint_vel")
+        {
+            observation = "dof_vel";
+        }
+
         if (observation == "ang_vel")
         {
             // In ROS1 Gazebo, the coordinate system for angular velocity is in the world coordinate system.
@@ -473,7 +520,22 @@ void RL::ReadYamlRL(std::string robot_path)
 
     this->params.model_name = config["model_name"].as<std::string>();
     this->params.num_observations = config["num_observations"].as<int>();
+
+    if (!config["observations"])
+    {
+        throw std::runtime_error("Missing required key 'observations' in config: " + config_path);
+    }
     this->params.observations = ReadVectorFromYaml<std::string>(config["observations"]);
+
+    if (config["lidar_obs_dim"])
+    {
+        this->params.lidar_obs_dim = config["lidar_obs_dim"].as<int>();
+    }
+    else
+    {
+        this->params.lidar_obs_dim = 187;
+    }
+
     if (config["observations_history"].IsNull())
     {
         this->params.observations_history = {};
@@ -502,7 +564,6 @@ void RL::ReadYamlRL(std::string robot_path)
     this->params.dof_pos_scale = config["dof_pos_scale"].as<double>();
     this->params.dof_vel_scale = config["dof_vel_scale"].as<double>();
     this->params.commands_scale = torch::tensor(ReadVectorFromYaml<double>(config["commands_scale"])).view({1, -1});
-    // this->params.commands_scale = torch::tensor({this->params.lin_vel_scale, this->params.lin_vel_scale, this->params.ang_vel_scale});
     this->params.rl_kp = torch::tensor(ReadVectorFromYaml<double>(config["rl_kp"])).view({1, -1});
     this->params.rl_kd = torch::tensor(ReadVectorFromYaml<double>(config["rl_kd"])).view({1, -1});
     this->params.fixed_kp = torch::tensor(ReadVectorFromYaml<double>(config["fixed_kp"])).view({1, -1});
@@ -512,7 +573,6 @@ void RL::ReadYamlRL(std::string robot_path)
     this->params.init_dof_pos = torch::tensor(ReadVectorFromYaml<double>(config["init_dof_pos"])).view({1, -1});
     this->params.joint_mapping = ReadVectorFromYaml<int>(config["joint_mapping"]);
 }
-
 void RL::CSVInit(std::string robot_path)
 {
     csv_filename = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + robot_path + "/motor";

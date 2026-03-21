@@ -259,7 +259,7 @@ void RL_Real::RunModel()
         this->obs.dof_pos = torch::tensor(this->robot_state.motor_state.q).narrow(0, 0, this->params.num_of_dofs).unsqueeze(0);
         this->obs.dof_vel = torch::tensor(this->robot_state.motor_state.dq).narrow(0, 0, this->params.num_of_dofs).unsqueeze(0);
 
-        this->obs.height_scan = torch::tensor(this->height_scan_obs).unsqueeze(0);
+        this->obs.lidar_scan = torch::tensor(this->height_scan_obs).unsqueeze(0);
         double height_scan_time_diff = this->now().seconds() - this->last_height_scan_time;
         if (height_scan_time_diff > 0.2) {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "Height map data stale, rate < 5Hz! Staleness: %f s", height_scan_time_diff);

@@ -65,6 +65,8 @@ if(NOT USE_CMAKE)
         find_package(rclcpp REQUIRED)
         find_package(gazebo_ros REQUIRED)
         find_package(std_msgs REQUIRED)
+        find_package(sensor_msgs REQUIRED)
+        find_package(tf2_ros REQUIRED)
         find_package(robot_msgs REQUIRED)
         find_package(robot_joint_controller REQUIRED)
         find_package(rclpy REQUIRED)
@@ -213,6 +215,7 @@ if(NOT USE_CMAKE)
             rclcpp
             gazebo_ros
             std_msgs
+            sensor_msgs
             robot_msgs
             robot_joint_controller
             rclpy
@@ -301,6 +304,7 @@ if(NOT USE_CMAKE)
         ament_target_dependencies(rl_real_go2
             rclcpp
             geometry_msgs
+            std_msgs
         )
         install(TARGETS rl_real_go2 DESTINATION lib/${PROJECT_NAME})
     endif()
@@ -356,11 +360,13 @@ if(NOT USE_CMAKE)
     if($ENV{ROS_DISTRO} MATCHES "noetic")
         catkin_install_python(PROGRAMS
             scripts/actuator_net.py
+            scripts/lidar_obs_preprocessor.py
             DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
         )
     elseif($ENV{ROS_DISTRO} MATCHES "foxy|humble")
         install(PROGRAMS
             scripts/actuator_net.py
+            scripts/lidar_obs_preprocessor.py
             DESTINATION lib/${PROJECT_NAME}
         )
     endif()

@@ -195,7 +195,7 @@ public:
 
         // read params from yaml
         // NOTE: Edit below to choose policy and config
-        rl.config_name = "dreamwaq";
+        rl.config_name = "go2_stairs";
         std::string robot_path = rl.robot_name + "/" + rl.config_name;
         try
         {

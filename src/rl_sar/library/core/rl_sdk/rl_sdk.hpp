@@ -131,6 +131,7 @@ struct ModelParams
     std::vector<std::string> observations;
     std::vector<int> observations_history;
     std::string observations_history_priority;
+    int lidar_obs_dim = 187; // defaul;t value, will be overwritten at run time for go2_stairs to 135
     double damping;
     double stiffness;
     torch::Tensor action_scale;
@@ -166,7 +167,7 @@ struct Observations
     torch::Tensor dof_pos;
     torch::Tensor dof_vel;
     torch::Tensor actions;
-    torch::Tensor height_scan;
+    torch::Tensor lidar_scan;
 };
 
 class RL

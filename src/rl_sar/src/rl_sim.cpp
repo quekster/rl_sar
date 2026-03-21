@@ -7,6 +7,8 @@
 
 #include <chrono>
 #include <ctime>
+#include <algorithm>
+#include <cmath>
 
 RL_Sim::RL_Sim()
 #if defined(USE_ROS2)
@@ -146,6 +148,18 @@ RL_Sim::RL_Sim()
         this->ros_namespace + "robot_joint_controller/state", rclcpp::SystemDefaultsQoS(),
         [this] (const robot_msgs::msg::RobotState::SharedPtr msg) {this->RobotStateCallback(msg);}
     );
+    this->gazebo_model_states_subscriber = this->create_subscription<gazebo_msgs::msg::ModelStates>(
+        "/gazebo/model_states", rclcpp::SystemDefaultsQoS(),
+        [this] (const gazebo_msgs::msg::ModelStates::SharedPtr msg) {this->GazeboModelStatesCallback(msg);}
+    );
+    this->lidar_obs_subscriber = this->create_subscription<std_msgs::msg::Float32MultiArray>(
+        "/rl_sar/lidar_obs_flat", rclcpp::SystemDefaultsQoS(),
+        [this] (const std_msgs::msg::Float32MultiArray::SharedPtr msg) {this->LidarObsCallback(msg);}
+    );
+    // this->odom_subscriber = this->create_subscription<nav_msgs::msg::Odometry>(
+    //     "/odom", rclcpp::SystemDefaultsQoS(),
+    //     [this] (const nav_msgs::msg::Odometry::SharedPtr msg) {this->OdomCallback(msg);}
+    // );
 
     // service
     this->gazebo_pause_physics_client = this->create_client<std_srvs::srv::Empty>("/pause_physics");
@@ -165,6 +179,9 @@ RL_Sim::RL_Sim()
     // keyboard
     this->loop_keyboard = std::make_shared<LoopFunc>("loop_keyboard", 0.05, std::bind(&RL_Sim::KeyboardInterface, this));
     this->loop_keyboard->start();
+
+    // Auto-trigger GetUp once in simulation to avoid limp/collapsed spawn posture.
+    this->control.SetKeyboard(Input::Keyboard::Num0);
 
 #ifdef PLOT
     this->plot_t = std::vector<int>(this->plot_size, 0);
@@ -429,8 +446,51 @@ void RL_Sim::GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
 {
     this->gazebo_imu = *msg;
 }
-#endif
 
+
+void RL_Sim::GazeboModelStatesCallback(const gazebo_msgs::msg::ModelStates::SharedPtr msg)
+{
+// Reads /gazebo/model_states.
+// Finds robot by name (gazebo_model_name), because model order in that message is not guaranteed.
+// Stores that robot’s world-frame linear/angular twist into model_twist_world.
+// Sets a health flag (model_state_available) and warns if model is missing.    
+    if (!msg)
+    {
+        return;
+    }
+
+    for (size_t i = 0; i < msg->name.size(); ++i)
+    {
+        if (msg->name[i] == this->gazebo_model_name)
+        {
+            this->model_twist_world = msg->twist[i];
+            this->model_state_available = true;
+            return;
+        }
+    }
+
+    this->model_state_available = false;
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "Model '%s' not found in /gazebo/model_states", this->gazebo_model_name.c_str());
+}
+
+void RL_Sim::LidarObsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
+{
+// to copy lidar float array into a fixed-size buffer
+    if (!msg)
+    {
+        return;
+    }
+
+    size_t copy_size = std::min(this->lidar_obs_buffer.size(), msg->data.size());
+    std::fill(this->lidar_obs_buffer.begin(), this->lidar_obs_buffer.end(), 1.0f);
+    for (size_t i = 0; i < copy_size; ++i)
+    {
+        this->lidar_obs_buffer[i] = std::isfinite(msg->data[i]) ? msg->data[i] : 1.0f;
+    }
+    this->last_lidar_obs_time = this->now().seconds();
+}
+#endif
 void RL_Sim::CmdvelCallback(
 #if defined(USE_ROS1)
     const geometry_msgs::Twist::ConstPtr &msg
@@ -515,23 +575,75 @@ void RL_Sim::RunModel()
     if (this->rl_init_done && simulation_running)
     {
         this->episode_length_buf += 1;
-        // this->obs.lin_vel = torch::tensor({{this->vel.linear.x, this->vel.linear.y, this->vel.linear.z}});
+
+#if defined(USE_ROS1)
+        this->obs.lin_vel = torch::tensor({{this->vel.linear.x, this->vel.linear.y, this->vel.linear.z}});
+#elif defined(USE_ROS2)
+        this->obs.lin_vel = torch::tensor({{this->model_twist_world.linear.x, this->model_twist_world.linear.y, this->model_twist_world.linear.z}});
+        if (!this->model_state_available)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "Using stale or unavailable /gazebo/model_states for lin_vel");
+        }
+#endif
+
         this->obs.ang_vel = torch::tensor(this->robot_state.imu.gyroscope).unsqueeze(0);
+
+        int64_t command_dim = 3;
+        if (this->params.commands_scale.numel() != 0)
+        {
+            command_dim = this->params.commands_scale.size(1);
+        }
+
         if (this->control.navigation_mode)
         {
-            this->obs.commands = torch::tensor({{this->cmd_vel.linear.x, this->cmd_vel.linear.y, this->cmd_vel.angular.z}});
+            if (command_dim >= 4)
+            {
+                this->obs.commands = torch::tensor({{this->cmd_vel.linear.x, this->cmd_vel.linear.y, this->cmd_vel.angular.z, 0.0}});
+            }
+            else
+            {
+                this->obs.commands = torch::tensor({{this->cmd_vel.linear.x, this->cmd_vel.linear.y, this->cmd_vel.angular.z}});
+            }
         }
         else
         {
-            this->obs.commands = torch::tensor({{this->control.x, this->control.y, this->control.yaw}});
+            if (command_dim >= 4)
+            {
+                this->obs.commands = torch::tensor({{this->control.x, this->control.y, this->control.yaw, 0.0}});
+            }
+            else
+            {
+                this->obs.commands = torch::tensor({{this->control.x, this->control.y, this->control.yaw}});
+            }
         }
+
         this->obs.base_quat = torch::tensor(this->robot_state.imu.quaternion).unsqueeze(0);
         this->obs.dof_pos = torch::tensor(this->robot_state.motor_state.q).narrow(0, 0, this->params.num_of_dofs).unsqueeze(0);
         this->obs.dof_vel = torch::tensor(this->robot_state.motor_state.dq).narrow(0, 0, this->params.num_of_dofs).unsqueeze(0);
-        this->obs.height_scan = torch::full({1, 187}, 0.31f); // dummy height scan data
+
+#if defined(USE_ROS2)
+// to copy lidar_obs_buffer into a tensor, with checks for size and staleness
+        std::vector<float> lidar_obs = this->lidar_obs_buffer;
+        if (lidar_obs.size() != static_cast<size_t>(this->params.lidar_obs_dim))
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "lidar_obs size mismatch: got %zu, expected %d", lidar_obs.size(), this->params.lidar_obs_dim);
+            lidar_obs.resize(this->params.lidar_obs_dim, 1.0f);
+        }
+        this->obs.lidar_scan = torch::tensor(lidar_obs).unsqueeze(0);
+
+        double lidar_obs_time_diff = this->now().seconds() - this->last_lidar_obs_time;
+        if (lidar_obs_time_diff > 0.2)
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                "Lidar observation data stale, rate < 5Hz! Staleness: %f s", lidar_obs_time_diff);
+        }
+#else
+        this->obs.lidar_scan = torch::full({1, this->params.lidar_obs_dim}, 0.31f);
+#endif
 
         this->obs.actions = this->Forward();
-        // std::cout << "actions: " << this->obs.actions << std::endl;
         this->ComputeOutput(this->obs.actions, this->output_dof_pos, this->output_dof_vel, this->output_dof_tau);
 
         if (this->output_dof_pos.defined() && this->output_dof_pos.numel() > 0)
@@ -547,7 +659,6 @@ void RL_Sim::RunModel()
             output_dof_tau_queue.push(this->output_dof_tau);
         }
 
-        // this->TorqueProtect(this->output_dof_tau);
         this->AttitudeProtect(this->robot_state.imu.quaternion, 75.0f, 75.0f);
 
 #ifdef CSV_LOGGER
@@ -560,11 +671,9 @@ void RL_Sim::RunModel()
 #endif
     }
 }
-
 torch::Tensor RL_Sim::Forward()
 {
     torch::autograd::GradMode::set_enabled(false);
-    std::cout << std::chrono::system_clock::now().time_since_epoch().count()<< std::endl;
 
     torch::Tensor clamped_obs = this->ComputeObservation();
 
