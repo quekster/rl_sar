@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 go2/go2_stairs:
-  model_name: "go2_stairs_D1.pt"
+  model_name: "go2_stairs_D5.pt"
   num_observations: 184
   lidar_obs_dim: 135
   observations: ["lin_vel_body", "ang_vel", "gravity_vec", "commands", "dof_pos", "dof_vel", "actions", "lidar_obs"]
@@ -34,10 +34,10 @@ go2/go2_stairs:
              5, 5, 5,
              5, 5, 5]
   num_of_dofs: 12
-  action_scale: [0.25, 0.25, 0.25,
-                 0.25, 0.25, 0.25,
-                 0.25, 0.25, 0.25,
-                 0.25, 0.25, 0.25]
+  action_scale: [0.18, 0.18, 0.18,
+                 0.18, 0.18, 0.18,
+                 0.18, 0.18, 0.18,
+                 0.18, 0.18, 0.18]
   wheel_indices: []
   lin_vel_scale: 1.0
   ang_vel_scale: 1.0

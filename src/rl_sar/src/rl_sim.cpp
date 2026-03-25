@@ -152,6 +152,10 @@ RL_Sim::RL_Sim()
         "/gazebo/model_states", rclcpp::SystemDefaultsQoS(),
         [this] (const gazebo_msgs::msg::ModelStates::SharedPtr msg) {this->GazeboModelStatesCallback(msg);}
     );
+    this->gazebo_model_states_subscriber_alt = this->create_subscription<gazebo_msgs::msg::ModelStates>(
+        "/model_states", rclcpp::SystemDefaultsQoS(),
+        [this] (const gazebo_msgs::msg::ModelStates::SharedPtr msg) {this->GazeboModelStatesCallback(msg);}
+    );
     this->lidar_obs_subscriber = this->create_subscription<std_msgs::msg::Float32MultiArray>(
         "/rl_sar/lidar_obs_flat", rclcpp::SystemDefaultsQoS(),
         [this] (const std_msgs::msg::Float32MultiArray::SharedPtr msg) {this->LidarObsCallback(msg);}
@@ -450,18 +454,16 @@ void RL_Sim::GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
 
 void RL_Sim::GazeboModelStatesCallback(const gazebo_msgs::msg::ModelStates::SharedPtr msg)
 {
-// Reads /gazebo/model_states.
-// Finds robot by name (gazebo_model_name), because model order in that message is not guaranteed.
-// Stores that robot’s world-frame linear/angular twist into model_twist_world.
-// Sets a health flag (model_state_available) and warns if model is missing.    
     if (!msg)
     {
         return;
     }
 
+    this->last_model_state_time = this->now().seconds();
+
     for (size_t i = 0; i < msg->name.size(); ++i)
     {
-        if (msg->name[i] == this->gazebo_model_name)
+        if (msg->name[i] == this->gazebo_model_name || msg->name[i] == this->robot_name)
         {
             this->model_twist_world = msg->twist[i];
             this->model_state_available = true;
@@ -469,9 +471,41 @@ void RL_Sim::GazeboModelStatesCallback(const gazebo_msgs::msg::ModelStates::Shar
         }
     }
 
+    for (size_t i = 0; i < msg->name.size(); ++i)
+    {
+        const std::string &name = msg->name[i];
+        const bool gazebo_name_match = !this->gazebo_model_name.empty() && name.find(this->gazebo_model_name) != std::string::npos;
+        const bool robot_name_match = !this->robot_name.empty() && name.find(this->robot_name) != std::string::npos;
+        if (gazebo_name_match || robot_name_match)
+        {
+            this->model_twist_world = msg->twist[i];
+            this->model_state_available = true;
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "Using fuzzy model match %s for model_states (expected %s)",
+                name.c_str(), this->gazebo_model_name.c_str());
+            return;
+        }
+    }
+
     this->model_state_available = false;
+    std::string names_preview;
+    const size_t preview_count = std::min<size_t>(msg->name.size(), 8);
+    for (size_t i = 0; i < preview_count; ++i)
+    {
+        if (i > 0)
+        {
+            names_preview += ", ";
+        }
+        names_preview += msg->name[i];
+    }
+    if (msg->name.size() > preview_count)
+    {
+        names_preview += ", ...";
+    }
+
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-        "Model '%s' not found in /gazebo/model_states", this->gazebo_model_name.c_str());
+        "Model %s (or %s) not found in model_states topic. Available: [%s]",
+        this->gazebo_model_name.c_str(), this->robot_name.c_str(), names_preview.c_str());
 }
 
 void RL_Sim::LidarObsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
@@ -500,6 +534,9 @@ void RL_Sim::CmdvelCallback(
 )
 {
     this->cmd_vel = *msg;
+#if defined(USE_ROS2)
+    this->last_cmd_vel_time = this->now().seconds();
+#endif
 }
 
 void RL_Sim::JoyCallback(
@@ -579,11 +616,18 @@ void RL_Sim::RunModel()
 #if defined(USE_ROS1)
         this->obs.lin_vel = torch::tensor({{this->vel.linear.x, this->vel.linear.y, this->vel.linear.z}});
 #elif defined(USE_ROS2)
-        this->obs.lin_vel = torch::tensor({{this->model_twist_world.linear.x, this->model_twist_world.linear.y, this->model_twist_world.linear.z}});
-        if (!this->model_state_available)
+        if (this->model_state_available)
         {
+            this->obs.lin_vel = torch::tensor({{this->model_twist_world.linear.x, this->model_twist_world.linear.y, this->model_twist_world.linear.z}});
+        }
+        else
+        {
+            this->obs.lin_vel = torch::zeros({1, 3});
+            const double now_s = this->now().seconds();
+            const double model_state_age_s = (this->last_model_state_time > 0.0) ? (now_s - this->last_model_state_time) : -1.0;
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                "Using stale or unavailable /gazebo/model_states for lin_vel");
+                "Using zero lin_vel because model_states is stale/unavailable (age %.3fs). Subscribed topics: /gazebo/model_states and /model_states",
+                model_state_age_s);
         }
 #endif
 
@@ -597,13 +641,30 @@ void RL_Sim::RunModel()
 
         if (this->control.navigation_mode)
         {
+            double cmd_x = this->cmd_vel.linear.x;
+            double cmd_y = this->cmd_vel.linear.y;
+            double cmd_yaw = this->cmd_vel.angular.z;
+
+#if defined(USE_ROS2)
+            const double now_s = this->now().seconds();
+            const double cmd_age_s = (this->last_cmd_vel_time > 0.0) ? (now_s - this->last_cmd_vel_time) : 1e9;
+            if (cmd_age_s > this->cmd_vel_timeout_s)
+            {
+                cmd_x = 0.0;
+                cmd_y = 0.0;
+                cmd_yaw = 0.0;
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                    "Using zero command: /cmd_vel is stale (age %.3fs > %.3fs)", cmd_age_s, this->cmd_vel_timeout_s);
+            }
+#endif
+
             if (command_dim >= 4)
             {
-                this->obs.commands = torch::tensor({{this->cmd_vel.linear.x, this->cmd_vel.linear.y, this->cmd_vel.angular.z, 0.0}});
+                this->obs.commands = torch::tensor({{cmd_x, cmd_y, cmd_yaw, 0.0}});
             }
             else
             {
-                this->obs.commands = torch::tensor({{this->cmd_vel.linear.x, this->cmd_vel.linear.y, this->cmd_vel.angular.z}});
+                this->obs.commands = torch::tensor({{cmd_x, cmd_y, cmd_yaw}});
             }
         }
         else
