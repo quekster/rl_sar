@@ -105,7 +105,10 @@ private:
     sensor_msgs::msg::Joy joy_msg;
     std::vector<float> lidar_obs_buffer = std::vector<float>(135, 1.0f);
     double last_lidar_obs_time = 0.0;
+    double last_cmd_vel_time = -1.0;
+    double cmd_vel_timeout_s = 0.25;
     bool model_state_available = false;
+    double last_model_state_time = -1.0;
     robot_msgs::msg::RobotCommand robot_command_publisher_msg;
     robot_msgs::msg::RobotState robot_state_subscriber_msg;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr gazebo_imu_subscriber;
@@ -113,6 +116,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscriber;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber;
     rclcpp::Subscription<gazebo_msgs::msg::ModelStates>::SharedPtr gazebo_model_states_subscriber;
+    rclcpp::Subscription<gazebo_msgs::msg::ModelStates>::SharedPtr gazebo_model_states_subscriber_alt;
     rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr lidar_obs_subscriber;
     // rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_pause_physics_client;
