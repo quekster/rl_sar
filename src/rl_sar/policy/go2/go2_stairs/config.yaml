@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 go2/go2_stairs:
-  model_name: "go2_stairs_D1.pt"
+  model_name: "test_policy.pt"
   num_observations: 184
   lidar_obs_dim: 135
   observations: ["lin_vel_body", "ang_vel", "gravity_vec", "commands", "dof_pos", "dof_vel", "actions", "lidar_obs"]

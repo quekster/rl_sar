@@ -57,6 +57,9 @@ def generate_launch_description():
             "-x", "-0.6",
             "-y", "0.0",
             "-z", "0.42",
+            # "-R", "0.0",
+            # "-P", "0.0",
+            # "-Y", "-1.0472",  # 30 deg yaw
             "-timeout", "120",
         ],
         output="screen",

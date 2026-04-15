@@ -190,7 +190,7 @@ public:
     void Enter() override
     {
         rl.episode_length_buf = 0;
-        pre_running_percent = 0.0f;
+        pre_running_percent = 1.0f;
         rl.now_state = *fsm_state;
 
         // read params from yaml

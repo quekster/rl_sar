@@ -72,6 +72,7 @@ class LidarObsPreprocessor(Node):
         self.declare_parameter("expected_points", 45)
         self.declare_parameter("max_range", 70.0)
         self.declare_parameter("stale_warn_s", 0.2)
+        self.declare_parameter("dump_processed_cloud", False)
 
         self.input_topic = str(self.get_parameter("input_topic").value)
         self.output_topic = str(self.get_parameter("output_topic").value)
@@ -79,6 +80,7 @@ class LidarObsPreprocessor(Node):
         self.expected_points = int(self.get_parameter("expected_points").value)
         self.max_range = float(self.get_parameter("max_range").value)
         self.stale_warn_s = float(self.get_parameter("stale_warn_s").value)
+        self.dump_processed_cloud = bool(self.get_parameter("dump_processed_cloud").value)
 
         self.publisher = self.create_publisher(Float32MultiArray, self.output_topic, 10)
         self.subscription = self.create_subscription(
@@ -95,11 +97,13 @@ class LidarObsPreprocessor(Node):
         self.msg_count_window = 0
         self.nan_count_window = 0
         self.diag_cycle = 0
+        self.total_msg_count = 0
         self.create_timer(1.0, self._diag_timer_callback)
 
         self.get_logger().info(
             f"Lidar preprocessor listening on {self.input_topic}, publishing {self.output_topic}, "
-            f"target_frame={self.target_frame}, expected_points={self.expected_points}, max_range={self.max_range}"
+            f"target_frame={self.target_frame}, expected_points={self.expected_points}, max_range={self.max_range}, "
+            f"dump_processed_cloud={self.dump_processed_cloud}"
         )
 
     def _field_offsets(self, msg: PointCloud2):
@@ -117,6 +121,7 @@ class LidarObsPreprocessor(Node):
     def _pointcloud_callback(self, msg: PointCloud2) -> None:
         self.last_msg_time = self.get_clock().now()
         self.msg_count_window += 1
+        self.total_msg_count += 1
 
         x_off, y_off, z_off = self._field_offsets(msg)
         if x_off is None or y_off is None or z_off is None:
@@ -169,9 +174,31 @@ class LidarObsPreprocessor(Node):
             flat.append(float(py * inv_range))
             flat.append(float(pz * inv_range))
 
+        if self.dump_processed_cloud:
+            self._dump_processed_cloud(transformed_points, flat)
+
         out = Float32MultiArray()
         out.data = flat
         self.publisher.publish(out)
+
+    def _dump_processed_cloud(self, transformed_points: List[Tuple[float, float, float]], flat: List[float]) -> None:
+        self.get_logger().info("===== BEGIN PROCESSED LIDAR DUMP =====")
+        self.get_logger().info(
+            f"Dumping processed cloud at message #{self.total_msg_count} in frame '{self.target_frame}'"
+        )
+
+        for i, (px, py, pz) in enumerate(transformed_points):
+            nx = flat[3 * i]
+            ny = flat[3 * i + 1]
+            nz = flat[3 * i + 2]
+            self.get_logger().info(
+                f"pt[{i:02d}] base_xyz=({px:.6f}, {py:.6f}, {pz:.6f}) | normalized=({nx:.6f}, {ny:.6f}, {nz:.6f})"
+            )
+
+        self.get_logger().info(
+            "flattened_normalized_lidar_obs=" + ",".join(f"{v:.6f}" for v in flat)
+        )
+        self.get_logger().info("===== END PROCESSED LIDAR DUMP =====")
 
     def _diag_timer_callback(self) -> None:
         now = self.get_clock().now()
