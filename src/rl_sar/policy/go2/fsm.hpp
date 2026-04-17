@@ -72,6 +72,11 @@ public:
         pre_running_percent = 0.0f;
         rl.running_percent = 0.0f;
         rl.now_state = *fsm_state;
+
+        // Clear latched internal command before policy takeover.
+        rl.control.x = 0.0;
+        rl.control.y = 0.0;
+        rl.control.yaw = 0.0;
         rl.start_state = rl.now_state;
     }
 
@@ -192,6 +197,11 @@ public:
         rl.episode_length_buf = 0;
         pre_running_percent = 1.0f;
         rl.now_state = *fsm_state;
+
+        // Clear latched internal command before policy takeover.
+        rl.control.x = 0.0;
+        rl.control.y = 0.0;
+        rl.control.yaw = 0.0;
 
         // read params from yaml
         // NOTE: Edit below to choose policy and config
