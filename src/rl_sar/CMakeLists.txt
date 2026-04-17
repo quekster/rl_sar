@@ -361,14 +361,12 @@ if(NOT USE_CMAKE)
         catkin_install_python(PROGRAMS
             scripts/actuator_net.py
             scripts/lidar_obs_preprocessor.py
-            scripts/gazebo_mock_odom_bridge.py
             DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
         )
     elseif($ENV{ROS_DISTRO} MATCHES "foxy|humble")
         install(PROGRAMS
             scripts/actuator_net.py
             scripts/lidar_obs_preprocessor.py
-            scripts/gazebo_mock_odom_bridge.py
             DESTINATION lib/${PROJECT_NAME}
         )
     endif()

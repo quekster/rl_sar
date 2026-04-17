@@ -156,11 +156,6 @@ RL_Sim::RL_Sim()
         "/rl_sar/lidar_obs_flat", rclcpp::SystemDefaultsQoS(),
         [this] (const std_msgs::msg::Float32MultiArray::SharedPtr msg) {this->LidarObsCallback(msg);}
     );
-    // this->odom_subscriber = this->create_subscription<nav_msgs::msg::Odometry>(
-    //     "/odom", rclcpp::SystemDefaultsQoS(),
-    //     [this] (const nav_msgs::msg::Odometry::SharedPtr msg) {this->OdomCallback(msg);}
-    // );
-
     // service
     this->gazebo_pause_physics_client = this->create_client<std_srvs::srv::Empty>("/pause_physics");
     this->gazebo_unpause_physics_client = this->create_client<std_srvs::srv::Empty>("/unpause_physics");

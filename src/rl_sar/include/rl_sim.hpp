@@ -114,7 +114,6 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber;
     rclcpp::Subscription<gazebo_msgs::msg::ModelStates>::SharedPtr gazebo_model_states_subscriber;
     rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr lidar_obs_subscriber;
-    // rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_pause_physics_client;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_unpause_physics_client;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_reset_world_client;
@@ -124,7 +123,6 @@ private:
     void GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
     void GazeboModelStatesCallback(const gazebo_msgs::msg::ModelStates::SharedPtr msg);
     void LidarObsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg);
-    // void OdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void CmdvelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
     void RobotStateCallback(const robot_msgs::msg::RobotState::SharedPtr msg);
     void JoyCallback(const sensor_msgs::msg::Joy::SharedPtr msg);
